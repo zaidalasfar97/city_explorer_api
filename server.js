@@ -10,7 +10,8 @@ const cors = require('cors');
 
 
 const server = express();
-server.use(cors()); // make it opened
+// make it opened
+server.use(cors());
 
 const PORT = process.env.PORT || 3030;
 // 3000
@@ -46,10 +47,6 @@ server.get('/location', (req, res) => {
 
 })
 
-// // localhost:3000/ssss
-server.use('*', (req, res) => {
-    res.status(404).send('route not found')
-})
 
 function Location(geoData) {
     this.search_query = 'Lynnwood';
@@ -58,8 +55,31 @@ function Location(geoData) {
     this.longitude = geoData[0].lon;
 }
 
+server.get('/weather', (req, res) => {
+    const weatherData = require('./data/weather.json');
+    const weatherArr = []
+    weatherData.data.forEach(item => {
+        const locObj = new Weather(item);
+        console.log(weatherData);
+        weatherArr.push(locObj);
+    })
 
+    res.send(weatherArr);
+})
+
+
+function Weather(weaData) {
+    this.weather = weaData.weather.description;
+    this.time = weaData.datetime;
+}
+
+
+// localhost:3000/ssss
+server.use('*', (req, res) => {
+    res.status(404).send('route not found')
+})
 
 server.listen(PORT, () => {
     console.log(`Listening on PORT ${PORT}`);
 })
+
