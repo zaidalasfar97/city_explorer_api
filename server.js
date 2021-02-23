@@ -4,6 +4,10 @@ const express = require('express');
 require('dotenv').config();
 const cors = require('cors');
 const superagent = require('superagent');
+const pg = require('pg');
+// const client = new pg.Client(process.env.DATABASE_URL);
+const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+
 
 const app = express();
 const PORT = process.env.PORT || 3030;
@@ -14,7 +18,7 @@ app.use(cors());
 // response: data to send
 
 app.get('/', handleHomeRoute);
-app.get('/location', locationHandler);
+app.get('/location', handlerLocation);
 app.get('/weather', weatherHandler);
 app.get('/parks', parksHandler);
 app.get('*', notFoundRouter);
@@ -34,37 +38,71 @@ function handleHomeRoute(req, res) {
 
 // location route
 // localhost:3000/location
-function locationHandler(req, res) {
-    const cityName = req.query.city;
-    console.log(cityName);
+// function locationHandler(req, res) {
+//     const cityName = req.query.city;
+//     console.log(cityName);
 
 
+//     let key = process.env.LOCATION_KEY;
+//     console.log(key);
+//     let url = `https://us1.locationiq.com/v1/search.php?key=${key}&q=${cityName}&format=json`
+
+//     superagent.get(url)
+//         .then(locData => {
+//             const locationData = new Location(cityName, locData.body[0]);
+//             console.log(locData);
+//             res.send(locationData);
+//         })
+
+//         .catch(() => {
+//             errorHandler('error in getting data form loctioniq web site', req, res);
+//         })
+
+// }
+function handlerLocation(req, res) {
+    let city = req.query.city;
     let key = process.env.LOCATION_KEY;
-    console.log(key);
-    let url = `https://us1.locationiq.com/v1/search.php?key=${key}&q=${cityName}&format=json`
-
-    superagent.get(url)
-        .then(locData => {
-            const locationData = new Location(cityName, locData.body[0]);
-            console.log(locData);
-            res.send(locationData);
+    let url = `https://eu1.locationiq.com/v1/search.php?key=${key}&q=${city}&format=json`;
+    const SQL = 'SELECT * FROM locations WHERE search_query = $1';
+    const safeData = [city];
+    client.query(SQL, safeData)
+        .then((result) => {
+            if (result.rows.length > 0) {
+                res.status(200).send(result.rows[0]);
+                console.log('FROM DATABASE', result.rows[0]);
+            } else {
+                superagent(url)
+                    .then((data) => {
+                        console.log('FROM API');
+                        const geoData = data.body;
+                        const locationData = new Location(city, geoData);
+                        const SQL = `INSERT INTO locations (search_query , formatted_query ,latitude, longitude) VALUES($1,$2,$3,$4) RETURNING *`;
+                        const saveData = [
+                            locationData.search_query,
+                            locationData.formatted_query,
+                            locationData.latitude,
+                            locationData.longitude
+                        ];
+                        client.query(SQL, saveData).then((result) => {
+                            // console.log(result.rows);
+                            res.status(200).send(result.rows[0]);
+                        })
+                    })
+            }
         })
-
-        .catch(() => {
-            errorHandler('error in getting data form loctioniq web site', req, res);
-        })
-
-}
+        .catch((error) => errorHandler(error, req, res));
+};
 
 function Location(city, geoData) {
     this.search_query = city;
-    this.formatted_query = geoData.display_name;
-    this.latitude = geoData.lat;
-    this.longitude = geoData.lon;
+    this.formatted_query = geoData[0].display_name;
+    this.latitude = geoData[0].lat;
+    this.longitude = geoData[0].lon;
 }
 
 function weatherHandler(req, res) {
     const cityName = req.query.search_query;
+
 
     // console.log(req.query) ;
     let key = process.env.WEATHER_API_KEY;
@@ -137,8 +175,12 @@ function notFoundRouter(req, res) {
 function errorHandler(error, req, res) {
     res.status(500).send(error);
 }
-
-app.listen(PORT, () => {
-    console.log(`Listening on PORT ${PORT}`);
-})
-
+client.connect()
+    .then(() => {
+        app.listen(PORT, () =>
+            console.log(`listening on ${PORT}`)
+        );
+    })
+    .catch((error) => {
+        res.send('cccccccccccc', error.message)
+    })
