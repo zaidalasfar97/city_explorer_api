@@ -5,8 +5,9 @@ require('dotenv').config();
 const cors = require('cors');
 const superagent = require('superagent');
 const pg = require('pg');
-// const client = new pg.Client(process.env.DATABASE_URL);
-const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+const { move } = require('superagent');
+const client = new pg.Client(process.env.DATABASE_URL);
+// const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
 
 const app = express();
@@ -21,8 +22,11 @@ app.get('/', handleHomeRoute);
 app.get('/location', handlerLocation);
 app.get('/weather', weatherHandler);
 app.get('/parks', parksHandler);
+app.get('/movies', movieHandler);
+app.get('/yelp', yelpHandler);
 app.get('*', notFoundRouter);
 app.get(errorHandler);
+
 
 
 
@@ -59,21 +63,23 @@ function handleHomeRoute(req, res) {
 //         })
 
 // }
+
 function handlerLocation(req, res) {
     let city = req.query.city;
     let key = process.env.LOCATION_KEY;
     let url = `https://eu1.locationiq.com/v1/search.php?key=${key}&q=${city}&format=json`;
     const SQL = 'SELECT * FROM locations WHERE search_query = $1';
     const safeData = [city];
+    console.log(safeData);
     client.query(SQL, safeData)
         .then((result) => {
             if (result.rows.length > 0) {
                 res.status(200).send(result.rows[0]);
-                console.log('FROM DATABASE', result.rows[0]);
+                // console.log('FROM DATABASE', result.rows[0]);
             } else {
                 superagent(url)
                     .then((data) => {
-                        console.log('FROM API');
+                        // console.log('FROM API');
                         const geoData = data.body;
                         const locationData = new Location(city, geoData);
                         const SQL = `INSERT INTO locations (search_query , formatted_query ,latitude, longitude) VALUES($1,$2,$3,$4) RETURNING *`;
@@ -104,7 +110,7 @@ function weatherHandler(req, res) {
     const cityName = req.query.search_query;
 
 
-    // console.log(req.query) ;
+    // console.log(req.query);
     let key = process.env.WEATHER_API_KEY;
     let url = `https://api.weatherbit.io/v2.0/forecast/daily?city=${cityName}&key=${key}`
 
@@ -134,7 +140,7 @@ function parksHandler(req, res) {
 
     // let code = req.query.latitude + ',' + req.query.longitude;
 
-    console.log(req.query);
+    // console.log(req.query);
     const city = req.query.search_query;
     let key = process.env.PARKS_API_KEY;
 
@@ -160,12 +166,67 @@ function Parks(parkData) {
     this.name = parkData.fullName;
     this.address = `${parkData.addresses[0].line1} ${parkData.addresses[0].city} ${parkData.addresses[0].stateCode} ${parkData.addresses[0].postalCode}`;
     this.fee = parkData.entranceFees[0].cost || '0.00';
-    // this.fee = '0.00';
     this.description = parkData.description;
     this.url = parkData.url;
 }
 
+function movieHandler(req, res) {
+    let key = process.env.MOVIE_API_KEY;
+    let city = req.query.search_query;
+    // console.log(req.query);
+    let url = `https://api.themoviedb.org/3/search/movie/?api_key=${key}&query=${city}`;
 
+    superagent.get(url)
+        .then(movieData => {
+            let moviesArray = movieData.body.results.map(val => {
+                return new Movie(val);
+            })
+            res.send(moviesArray);
+        })
+        .catch(() => {
+            errorHandler('Sorry ,You have problem', req, res)
+        })
+}
+function Movie(movie) {
+    this.title = movie.title;
+    this.overview = movie.overview;
+    this.average_votes = movie.vote_average;
+    this.total_votes = movie.vote_count;
+    this.image_url = `https://image.tmdb.org/t/p/w500${movie.poster_path}`;
+    this.popularity = movie.popularity;
+    this.released_on = movie.released_on;
+}
+
+function yelpHandler(req, res) {
+    let city = req.query.search_query;
+    let key = process.env.YELP_API_KEY;
+    const page = req.query.page;
+    const pageLim = 5;
+    const start = ((page - 1) * pageLim + 1);
+    let url = `https://api.yelp.com/v3/businesses/search?location=${city}&limit=${pageLim}&offset=${start}`;
+
+    superagent.get(url)
+        .set({ "Authorization": `Bearer ${key}` })
+        .then(yelpData => {
+
+            let yelpArray = yelpData.body.businesses.map(val => {
+                return new Yelp(val);
+            })
+            res.status(200).send(yelpArray);
+        })
+        .catch(() => {
+            errorHandler('Sorry ,You have problem', req, res)
+        })
+
+}
+
+function Yelp(data) {
+    this.name = data.name;
+    this.image_url = data.image_url;
+    this.price = data.price;
+    this.rating = data.rating;
+    this.url = data.url;
+}
 
 // localhost:3000/ssss
 function notFoundRouter(req, res) {
